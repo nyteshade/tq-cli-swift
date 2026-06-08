@@ -8,15 +8,31 @@ A command-line processor for [TOON](https://github.com/toon-format/spec) (Token-
 
 `tq` reads TOON or JSON from stdin or files, and can **query** (extract values with jq‑like path expressions), **mutate** (set, delete, merge fields), and **convert** between formats.
 
+## Installation
+
+### Homebrew
+
+```bash
+brew tap YOUR_USERNAME/tq
+brew install tq
+```
+
+### Manual (from source)
+
+```bash
+git clone https://github.com/YOUR_USERNAME/tq.git
+cd tq
+swift build -c release
+cp .build/release/tq /usr/local/bin/
+```
+
+### Binary download
+
+Grab the latest `tq` binary from [GitHub Releases](https://github.com/YOUR_USERNAME/tq/releases) and place it in your `$PATH`.
+
 ## Quick Start
 
 ```bash
-# Build
-swift build -c release
-
-# Install
-cp .build/release/tq /usr/local/bin/
-
 # Query a TOON document
 echo 'users[2]{id,name}:
   1,Alice
