@@ -152,6 +152,57 @@ extension TOONNode {
         }
     }
 
+    /// Append a value to the array at the given path.  If the path points to
+    /// a non-array or a non-existent node, an empty array is created first.
+    func appending(_ segments: [PathSegment], value: TOONNode) -> TOONNode {
+        guard let first = segments.first else {
+            // Append at root: wrap in array if needed, then append
+            if case var .array(arr) = self {
+                arr.append(value)
+                return .array(arr)
+            }
+            return .array([self, value])
+        }
+        let rest = Array(segments.dropFirst())
+
+        switch first {
+        case let .key(key):
+            let (dict, keyOrder): ([String: TOONNode], [String])
+            if case let .object(d, o) = self {
+                dict = d; keyOrder = o
+            } else {
+                var d: [String: TOONNode] = [:]
+                var o: [String] = []
+                d[key] = TOONNode.array([]).appending(rest, value: value)
+                o.append(key)
+                return .object(d, keyOrder: o)
+            }
+            var newDict = dict
+            var newOrder = keyOrder
+            let child = newDict[key] ?? .array([])
+            newDict[key] = child.appending(rest, value: value)
+            if !newOrder.contains(key) { newOrder.append(key) }
+            return .object(newDict, keyOrder: newOrder)
+
+        case let .index(idx):
+            // Index in add context: treat as "append at position" if within bounds,
+            // otherwise append at end.
+            let arr: [TOONNode]
+            if case let .array(a) = self { arr = a } else { arr = [] }
+            var newArr = arr
+            if rest.isEmpty {
+                let at = idx < 0 ? max(0, newArr.count + idx + 1) : idx
+                let insertAt = min(at, newArr.count)
+                newArr.insert(value, at: insertAt)
+            } else {
+                let resolved = idx < 0 ? max(0, newArr.count + idx) : idx
+                while newArr.count <= resolved { newArr.append(.null) }
+                newArr[resolved] = newArr[resolved].appending(rest, value: value)
+            }
+            return .array(newArr)
+        }
+    }
+
     /// Deep-merge another node into this one.
     /// - Objects are merged recursively; incoming values win on conflict.
     /// - Arrays: incoming replaces entirely.
@@ -186,6 +237,7 @@ extension TOONNode {
 enum MutationCommand: Equatable {
     case set(path: String, value: TOONNode)
     case del(path: String)
+    case add(path: String, value: TOONNode)
     case merge(node: TOONNode)
 }
 
@@ -218,6 +270,15 @@ enum MutationRunner {
                 throw MutationError.invalidPath("Cannot delete the root document")
             }
             return result
+
+        case let .add(pathStr, value):
+            let expr = try QueryParser.parse(pathStr)
+            guard let segments = expr.asPath() else {
+                throw MutationError.invalidPath(
+                    "Path '\(pathStr)' contains iterator or slice, which are not allowed for add"
+                )
+            }
+            return node.appending(segments, value: value)
 
         case let .merge(other):
             return node.merging(with: other)

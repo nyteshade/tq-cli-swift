@@ -91,7 +91,7 @@ enum TqCommand {
     }
 
     private static func isSubcommand(_ word: String) -> Bool {
-        return word == "set" || word == "del" || word == "delete" || word == "merge"
+        return word == "set" || word == "del" || word == "delete" || word == "add" || word == "merge"
     }
 
     // MARK: - Query Mode Parsing
@@ -215,8 +215,34 @@ enum TqCommand {
             }
 
             options.mode = .mutation(command: .set(path: path, value: value))
-            if positional.count > 3 {
-                options.files = Array(positional.dropFirst(3))
+            // Files come after path + value.  When --json/--toon supplied the
+            // value, only the path counts as consumed; otherwise path+value.
+            let consumedCount = (inlineJSON != nil || inlineTOON != nil) ? 2 : 3
+            if positional.count > consumedCount {
+                options.files = Array(positional.dropFirst(consumedCount))
+            }
+
+        case "add":
+            guard positional.count >= 2 else {
+                throw TqError.invalidInput("add requires a path and a value")
+            }
+            let path = positional[1]
+            let value: TOONNode
+
+            if let jsonStr = inlineJSON {
+                value = try decodeJSON(jsonStr)
+            } else if let toonStr = inlineTOON {
+                value = try decodeTOON(toonStr)
+            } else if positional.count >= 3 {
+                value = try parseLiteralValue(positional[2])
+            } else {
+                throw TqError.invalidInput("add requires a value (use --json or --toon for structured values, or a literal)")
+            }
+
+            options.mode = .mutation(command: .add(path: path, value: value))
+            let consumedCount = (inlineJSON != nil || inlineTOON != nil) ? 2 : 3
+            if positional.count > consumedCount {
+                options.files = Array(positional.dropFirst(consumedCount))
             }
 
         case "del", "delete":
@@ -482,6 +508,7 @@ enum TqCommand {
 
         Mutation subcommands:
           tq set [options] <path> <value> [file]
+          tq add [options] <path> <value> [file]
           tq del [options] <path> [file]
           tq merge [options] <source> [file]
 
@@ -505,6 +532,8 @@ enum TqCommand {
           set  <path> <value>  Set a value (auto-creates parent objects/arrays)
                                Use --json for JSON, --toon for TOON values
                                Literal examples: "hello", 42, true, null
+          add  <path> <value>  Append to an array (creates array if needed)
+                               Same value options as set
           del  <path>          Delete a key or array element
           merge <source>       Deep-merge another document
                                <source>: file path, - (stdin),
@@ -522,6 +551,10 @@ enum TqCommand {
 
           # Set (in-place, modifies the file)
           tq -i set .name "Brielle" data.toon
+
+          # Add (append to array)
+          tq -i add .tags "newtag" data.toon
+          tq -i add .users --json '{"id":3,"name":"Cal"}' data.toon
 
           # Delete
           echo 'name:Ada\\nage:36' | tq del .age
