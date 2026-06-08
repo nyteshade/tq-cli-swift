@@ -6,29 +6,46 @@
 
 A command-line processor for [TOON](https://github.com/toon-format/spec) (Token-Oriented Object Notation) and JSON, inspired by [jq](https://jqlang.github.io/jq/) and [yq](https://github.com/mikefarah/yq).
 
-`tq` reads TOON or JSON from stdin or files, and can **query** (extract values with jq‑like path expressions), **mutate** (set, delete, merge fields), and **convert** between formats.
+`tq` reads TOON or JSON from stdin or files and can **query** (jq‑like path expressions), **mutate** (set, add, delete, merge), and **convert** between formats. Mutations can edit files in place with `-i`.
+
+## Installation
+
+### Homebrew
+
+```bash
+brew tap YOUR_USERNAME/tq
+brew install tq
+```
+
+### From source
+
+```bash
+git clone https://github.com/YOUR_USERNAME/tq.git
+cd tq
+swift build -c release
+cp .build/release/tq /usr/local/bin/
+```
 
 ## Quick Start
 
 ```bash
-# Build
-swift build -c release
-
-# Install
-cp .build/release/tq /usr/local/bin/
-
-# Query a TOON document
+# Query
 echo 'users[2]{id,name}:
   1,Alice
   2,Bob' | tq .users[0].name
 # → Alice
 
-# Convert TOON to JSON
-echo 'users[2]{id,name}:
-  1,Alice
-  2,Bob' | tq -j .users
-# → [{"id":1,"name":"Alice"},{"id":2,"name":"Bob"}]
+# Convert to JSON
+tq -j .users data.toon
+
+# Edit a file in place
+tq -i set .name "Brielle" data.toon
+
+# Append to an array
+tq -i add .tags "new-tag" data.toon
 ```
+
+---
 
 ## Usage
 
@@ -38,33 +55,35 @@ echo 'users[2]{id,name}:
 tq [options] <expression> [file...]
 ```
 
-Evaluates a path expression against the input document and outputs the matching value(s).
+Evaluates a path expression and outputs the matching value(s).
 
 ### Mutation mode
 
 ```bash
 tq set  [options] <path> <value>  [file]
+tq add  [options] <path> <value>  [file]
 tq del  [options] <path>          [file]
 tq merge [options] <source>       [file]
 ```
 
-Applies a mutation to the input document and outputs the entire modified document. Mutations are composable via pipes.
+Applies a mutation and outputs the full modified document.  Use `-i` to write the result back to the input file instead of stdout.  Mutations compose via pipes.
 
 ### Options
 
 | Flag | Description |
 |------|-------------|
 | `-j`, `--json-output` | Output as JSON instead of TOON |
-| `-r`, `--raw-output` | Output raw strings without quotes or formatting |
+| `-r`, `--raw-output` | Output raw strings (no quotes or formatting) |
 | `-c`, `--compact-output` | Compact output (no pretty‑printing) |
-| `--json <value>` | Supply an inline JSON value (for `set` / `merge`) |
-| `--toon <value>` | Supply an inline TOON value (for `set` / `merge`) |
+| `-i`, `--in-place` | Edit the file in place |
+| `--json <value>` | Inline JSON value (for `set` / `add` / `merge`) |
+| `--toon <value>` | Inline TOON value (for `set` / `add` / `merge`) |
 | `-h`, `--help` | Show help |
 | `-V`, `--version` | Show version |
 
-If no file is given, `tq` reads from **stdin**. Input format (TOON or JSON) is auto‑detected.
+If no file is given, `tq` reads from **stdin**.  Input format (TOON or JSON) is auto‑detected.
 
-### Path expression syntax (jq‑like)
+### Path expressions (jq‑like)
 
 | Expression | Description |
 |------------|-------------|
@@ -75,7 +94,33 @@ If no file is given, `tq` reads from **stdin**. Input format (TOON or JSON) is a
 | `.[]` | Array iterator — expand each element |
 | `.[start:end]` | Array slice (either bound may be omitted) |
 
-Path expressions can be chained: `.users[0].name`, `.[1:3]`, `.config.database.host`.
+Paths chain freely: `.users[0].name`, `.[-1]`, `.config.database.host`.
+
+### Mutation commands
+
+| Command | Description |
+|---------|-------------|
+| `set <path> <value>` | Set a value. Auto‑creates intermediate objects/arrays. |
+| `add <path> <value>` | Append to an array. Creates the array if it doesn't exist. |
+| `del <path>` | Delete a key or array element. No‑op if the path doesn't exist. |
+| `merge <source>` | Deep‑merge another document. Objects merge recursively; scalars and arrays are replaced. |
+
+**Value sources** — `set` and `add` accept values three ways:
+
+| Style | Example |
+|-------|---------|
+| Literal | `"hello"`, `42`, `true`, `null`, `3.14` — auto‑detected |
+| Inline JSON | `--json '{"id":1,"name":"Ada"}'` |
+| Inline TOON | `--toon 'a: 1\nb: 2'` |
+
+**Merge sources** — `merge` accepts:
+
+| Style | Example |
+|-------|---------|
+| File path | `tq merge extra.toon data.toon` |
+| stdin | `echo '{"x":1}' \| tq merge - data.toon` |
+| Inline JSON | `tq merge --json '{"b":2}' data.toon` |
+| Inline TOON | `tq merge --toon 'b: 2' data.toon` |
 
 ---
 
@@ -89,7 +134,7 @@ echo 'name: Ada
 age: 36' | tq .name
 # → Ada
 
-# Nested field access
+# Nested field
 echo 'user:
   name: Ada
   age: 36' | tq .user.name
@@ -99,14 +144,14 @@ echo 'user:
 echo 'tags[3]: alpha,beta,gamma' | tq .tags[-1]
 # → gamma
 
-# Slice an array
+# Slice
 echo '[5]: a,b,c,d,e' | tq '.[0:3]'
 # → [3]: a,b,c
 
-# Convert to JSON
+# TOON → JSON
 tq -j .users data.toon
 
-# Process JSON input (auto‑detected)
+# JSON input (auto‑detected)
 echo '{"users":[{"id":1}]}' | tq .users[0].id
 # → 1
 
@@ -117,20 +162,23 @@ tq -r .name data.toon
 ### Setting values
 
 ```bash
-# Add a field
+# Add a field (stdout)
 echo 'name: Ada' | tq set .age 36
 # → name: Ada
 #   age: 36
+
+# Edit a file in place
+tq -i set .name "Brielle" data.toon
 
 # Auto‑create nested objects
 echo '{}' | tq set .user.name Alice
 # → user.name: Alice
 
-# Set booleans and null
-echo 'a: 1' | tq set .active true
-echo 'a: 1' | tq set .email null
+# Booleans and null (auto‑detected)
+tq -i set .active true data.toon
+tq -i set .email null data.toon
 
-# Set a structured value via inline JSON
+# Structured value via inline JSON
 echo 'items:' | tq set .items[0] --json '{"id":1,"name":"Widget"}'
 # → items[1]{id,name}:
 #     1,Widget
@@ -138,19 +186,33 @@ echo 'items:' | tq set .items[0] --json '{"id":1,"name":"Widget"}'
 # Extend an array beyond its current length (gaps become null)
 echo '[]' | tq set '.[2]' third
 # → [3]: null,null,third
-
-# Set via inline TOON
-echo '{}' | tq set .nested --toon 'a: 1
-b: 2'
 ```
 
-### Deleting values
+### Adding to arrays
+
+```bash
+# Append a primitive
+echo 'tags[2]: alpha,beta' | tq add .tags gamma
+# → tags[3]: alpha,beta,gamma
+
+# Append an object to a tabular array
+tq -i add .users --json '{"id":3,"name":"Cal"}' data.toon
+# users[3]{id,name}:
+#   1,Ada
+#   2,Bob
+#   3,Cal
+
+# First add auto‑creates the array
+echo 'name: Ada' | tq add .tags coding
+# → name: Ada
+#   tags[1]: coding
+```
+
+### Deleting
 
 ```bash
 # Remove a key
-echo 'name: Ada
-age: 36' | tq del .age
-# → name: Ada
+tq -i del .age data.toon
 
 # Remove an array element
 echo '[3]: a,b,c' | tq del '.[1]'
@@ -161,7 +223,7 @@ echo 'a: 1' | tq del .b
 # → a: 1
 ```
 
-### Merging documents
+### Merging
 
 ```bash
 # Merge with inline JSON
@@ -169,7 +231,7 @@ echo 'a: 1' | tq merge --json '{"b":2}'
 # → a: 1
 #   b: 2
 
-# Deep merge (objects merge recursively, scalars are replaced)
+# Deep merge (objects merge recursively)
 echo 'user:
   name: Ada' | tq merge --json '{"user":{"age":36}}'
 # → user:
@@ -177,7 +239,7 @@ echo 'user:
 #     name: Ada
 
 # Merge from a file
-tq merge extra.toon data.toon
+tq -i merge extra.toon data.toon
 
 # Merge from stdin
 echo '{"new":"field"}' | tq merge - data.toon
@@ -192,17 +254,41 @@ cat data.toon | tq set .count 10 | tq del .temp | tq .users
 # Build a document from scratch
 echo '{}' \
   | tq set .name "Ada" \
-  | tq set .age 36 \
-  | tq set .tags --json '["coding","math"]' \
+  | tq add .tags coding \
+  | tq add .tags math \
   | tq -j .
-# → {"age":36,"name":"Ada","tags":["coding","math"]}
+# → {"name":"Ada","tags":["coding","math"]}
+```
+
+### Working with tabular arrays
+
+```bash
+# Create a tabular array
+tq -i set .users --json '[{"id":1,"name":"Ada"},{"id":2,"name":"Bob"}]' data.toon
+# → users[2]{id,name}:
+#     1,Ada
+#     2,Bob
+
+# Add a row
+tq -i add .users --json '{"id":3,"name":"Cal"}' data.toon
+# → users[3]{id,name}:
+#     1,Ada
+#     2,Bob
+#     3,Cal
+
+# Edit a field in a specific row
+tq -i set .users[0].name "Adaline" data.toon
+# Adding a non‑uniform field expands the array to list format
+
+# Delete a row
+tq -i del .users[-1] data.toon
 ```
 
 ---
 
 ## TOON Format Reference
 
-TOON is a line‑oriented, indentation‑based encoding of the JSON data model, designed for LLM prompts. It reduces token usage by **30–60%** compared to JSON.
+TOON is a line‑oriented, indentation‑based encoding of the JSON data model, designed for LLM prompts.  It reduces token usage by **30–60%** compared to JSON.
 
 ```toon
 # Object
@@ -243,14 +329,14 @@ Sources/tq/
 ├── main.swift          # CLI entry point
 ├── TOONNode.swift      # Generic Codable tree type (JSON/TOON interchange)
 ├── Query.swift         # jq-like path expression parser & evaluator
-├── Mutation.swift      # Set / delete / merge operations on the tree
-└── TqCommand.swift     # Argument parsing, I/O, format auto-detection, output
+├── Mutation.swift       # set / add / del / merge tree operations
+└── TqCommand.swift      # Argument parsing, I/O, format auto-detection, output
 ```
 
 - **Parsing**: TOON input is decoded via the official [`toon-format/toon-swift`](https://github.com/toon-format/toon-swift) library (spec v3.0+).
 - **Tree representation**: `TOONNode` — a `Codable` enum that transparently bridges TOON ↔ JSON.
 - **Format detection**: Input is classified as JSON or TOON by inspecting structural markers (braces, array headers, etc.).
-- **Mutations are functional**: `set`/`del`/`merge` return new trees; the original is never mutated in place.
+- **Mutations are functional**: `set` / `add` / `del` / `merge` return new trees; the original is never mutated in place.
 
 ## Dependencies
 
