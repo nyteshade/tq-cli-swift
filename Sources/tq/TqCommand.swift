@@ -24,6 +24,7 @@ struct TqOptions {
     var outputMode: OutputMode = .toon
     var rawOutput: Bool = false
     var compactOutput: Bool = false
+    var inPlace: Bool = false
     var files: [String] = []
 }
 
@@ -38,6 +39,10 @@ enum TqCommand {
         let input: String
         if options.files.isEmpty {
             input = try readStdin()
+        } else if options.inPlace {
+            // With -i: if file doesn't exist, start with empty document
+            input = options.files.compactMap { try? String(contentsOfFile: $0, encoding: .utf8) }
+                .joined(separator: "\n")
         } else {
             input = try options.files.map { try String(contentsOfFile: $0, encoding: .utf8) }
                 .joined(separator: "\n")
@@ -51,11 +56,24 @@ enum TqCommand {
         case let .query(expression):
             let query = try QueryParser.parse(expression)
             let results = try QueryEvaluator.evaluate(query, on: node)
-            try outputResults(results, options: options)
+            if options.inPlace, !options.files.isEmpty {
+                try writeResultsInPlace(results, options: options)
+            } else {
+                try outputResults(results, options: options)
+            }
 
         case let .mutation(command):
             let modified = try MutationRunner.apply(command, to: node)
-            try outputResults([modified], options: options)
+            let results = [modified]
+            if options.inPlace, !options.files.isEmpty {
+                try writeResultsInPlace(results, options: options)
+            } else {
+                // Hint: file given but no -i
+                if !options.files.isEmpty {
+                    fputs("tq: output written to stdout (use -i to modify the file in place)\n", stderr)
+                }
+                try outputResults(results, options: options)
+            }
         }
     }
 
@@ -100,6 +118,8 @@ enum TqCommand {
                 options.outputMode = .json
             case "-t", "--toon-output":
                 options.outputMode = .toon
+            case "-i", "--in-place":
+                options.inPlace = true
             case "-f", "--from-json":
                 break
             default:
@@ -147,6 +167,8 @@ enum TqCommand {
                     options.outputMode = .json
                 case "-t", "--toon-output":
                     options.outputMode = .toon
+                case "-i", "--in-place":
+                    options.inPlace = true
                 case "--json":
                     i += 1
                     guard i < args.count else {
@@ -378,6 +400,35 @@ enum TqCommand {
 
     // MARK: - Output
 
+    /// Write results back to the input file(s), overwriting them.
+    private static func writeResultsInPlace(_ results: [TOONNode], options: TqOptions) throws {
+        guard !options.files.isEmpty else {
+            // Fall back to stdout
+            try outputResults(results, options: options)
+            return
+        }
+
+        for file in options.files {
+            let output: String
+            switch options.outputMode {
+            case .json:
+                // For in-place JSON, combine multiple results into an array if needed
+                if results.count == 1 {
+                    let pretty = !options.compactOutput
+                    output = try results[0].toJSONString(pretty: pretty)
+                } else {
+                    let array = TOONNode.array(results)
+                    let pretty = !options.compactOutput
+                    output = try array.toJSONString(pretty: pretty)
+                }
+            case .toon:
+                output = results.map { (try? $0.toTOONString()) ?? "" }
+                    .joined(separator: "\n---\n")
+            }
+            try output.write(toFile: file, atomically: true, encoding: .utf8)
+        }
+    }
+
     private static func outputResults(_ results: [TOONNode], options: TqOptions) throws {
         if results.isEmpty {
             return
@@ -438,6 +489,7 @@ enum TqCommand {
           -j, --json-output    Output as JSON instead of TOON
           -r, --raw-output     Output raw strings (no quotes/formatting)
           -c, --compact-output Compact output (no pretty printing)
+          -i, --in-place       Edit file in place (writes output back to input file)
           -h, --help           Show this help message
           -V, --version        Show version information
 
@@ -463,18 +515,21 @@ enum TqCommand {
           echo 'name: Ada' | tq .name
           tq -j .users data.toon
 
-          # Set
+          # Set (stdout by default)
           echo 'name: Ada' | tq set .age 36
           echo 'items:' | tq set .items[0] --json '{"id":1}'
           echo '{}' | tq set .user.name "Alice"
 
+          # Set (in-place, modifies the file)
+          tq -i set .name "Brielle" data.toon
+
           # Delete
           echo 'name:Ada\\nage:36' | tq del .age
-          echo '[3]: a,b,c' | tq del .[1]
+          tq -i del .age data.toon
 
           # Merge
           echo 'a: 1' | tq merge --json '{"b":2}'
-          echo 'a: 1' | tq merge extra.toon
+          tq -i merge extra.toon data.toon
 
           # Chaining
           cat data.toon | tq set .count 10 | tq del .temp | tq .users
