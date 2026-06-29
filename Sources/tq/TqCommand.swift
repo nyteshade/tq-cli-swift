@@ -25,6 +25,7 @@ struct TqOptions {
     var rawOutput: Bool = false
     var compactOutput: Bool = false
     var inPlace: Bool = false
+    var colorMode: ColorMode = .auto
     var files: [String] = []
 }
 
@@ -120,6 +121,10 @@ enum TqCommand {
                 options.outputMode = .toon
             case "-i", "--in-place":
                 options.inPlace = true
+            case "--color":
+                options.colorMode = .always
+            case "--no-color":
+                options.colorMode = .never
             case "-f", "--from-json":
                 break
             default:
@@ -169,6 +174,10 @@ enum TqCommand {
                     options.outputMode = .toon
                 case "-i", "--in-place":
                     options.inPlace = true
+                case "--color":
+                    options.colorMode = .always
+                case "--no-color":
+                    options.colorMode = .never
                 case "--json":
                     i += 1
                     guard i < args.count else {
@@ -469,13 +478,15 @@ enum TqCommand {
     }
 
     private static func outputJSON(_ results: [TOONNode], options: TqOptions) throws {
+        let colorize = options.colorMode.isEnabled
         for result in results {
             if options.rawOutput, case let .string(s) = result {
+                // Raw strings are emitted verbatim — no coloring.
                 print(s)
             } else {
                 let pretty = !options.compactOutput
                 let json = try result.toJSONString(pretty: pretty && results.count == 1)
-                print(json)
+                print(colorize ? Highlighter.json(json) : json)
                 if results.count > 1, !options.compactOutput {
                     print("---")
                 }
@@ -484,12 +495,14 @@ enum TqCommand {
     }
 
     private static func outputTOON(_ results: [TOONNode], options: TqOptions) throws {
+        let colorize = options.colorMode.isEnabled
         for result in results {
             if options.rawOutput, case let .string(s) = result {
+                // Raw strings are emitted verbatim — no coloring.
                 print(s)
             } else {
                 let toon = try result.toTOONString()
-                print(toon)
+                print(colorize ? Highlighter.toon(toon) : toon)
                 if results.count > 1 {
                     print("---")
                 }
@@ -517,6 +530,8 @@ enum TqCommand {
           -r, --raw-output     Output raw strings (no quotes/formatting)
           -c, --compact-output Compact output (no pretty printing)
           -i, --in-place       Edit file in place (writes output back to input file)
+          --color              Force colorized output (even when piped)
+          --no-color           Disable colorized output
           -h, --help           Show this help message
           -V, --version        Show version information
 
@@ -573,7 +588,7 @@ enum TqCommand {
     }
 
     private static func printVersion() {
-        print("tq 0.2.0")
+        print("tq 0.3.0")
     }
 }
 

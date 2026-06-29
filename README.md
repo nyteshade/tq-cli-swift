@@ -76,12 +76,26 @@ Applies a mutation and outputs the full modified document.  Use `-i` to write th
 | `-r`, `--raw-output` | Output raw strings (no quotes or formatting) |
 | `-c`, `--compact-output` | Compact output (no pretty‑printing) |
 | `-i`, `--in-place` | Edit the file in place |
+| `--color` | Force colorized output (even when piped) |
+| `--no-color` | Disable colorized output |
 | `--json <value>` | Inline JSON value (for `set` / `add` / `merge`) |
 | `--toon <value>` | Inline TOON value (for `set` / `add` / `merge`) |
 | `-h`, `--help` | Show help |
 | `-V`, `--version` | Show version |
 
 If no file is given, `tq` reads from **stdin**.  Input format (TOON or JSON) is auto‑detected.
+
+### Syntax highlighting
+
+`tq` colorizes TOON and JSON output when writing to a terminal. Keys, strings,
+numbers, booleans, `null`, and structural punctuation each get a distinct color.
+Coloring is **TTY‑aware**: it's automatically disabled when output is piped or
+redirected, so downstream tools never see ANSI escape codes.
+
+- Use `--color` to force colors on (e.g. when piping into a pager like `less -R`).
+- Use `--no-color`, or set the [`NO_COLOR`](https://no-color.org) environment
+  variable, to turn coloring off.
+- Raw string output (`-r`) is always emitted verbatim, without color.
 
 ### Path expressions (jq‑like)
 
